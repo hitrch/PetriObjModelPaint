@@ -438,5 +438,214 @@ public class PetriObjModel implements Serializable, Cloneable  {
                                 li.getOther().getName()+".p["+ li.getNumPlaceOther()+"] ");
         }
     }
-    
+
+    public double analyse(double timeModeling, ArrayList<Double> infoFromCameras, boolean useInfoFromCameras) throws ExceptionInvalidNetStructure, ExceptionInvalidTimeDelay {//added 19.05.2021 by Vladyslav Palii
+        double min;
+        int currentPositionInArray = 0;
+        double timeInCycle = 60.0;
+        this.setSimulationTime(timeModeling);
+        this.setCurrentTime(0.0);
+
+        getListObj().sort(PetriSim.getComparatorByPriority()); //edited 9.11.2015, 12.10.2017
+        for (PetriSim e : getListObj()) { //edited 9.11.2015, 18.07.2018
+            e.input();
+        }
+        if (isProtocolPrint() == true) {
+            for (PetriSim e : getListObj()) {
+                e.printMark();
+            }
+        }
+        ArrayList<PetriSim> conflictObj = new ArrayList<>();
+        Random r = new Random();
+
+        while (this.getCurrentTime() < this.getSimulationTime()) { // edited 18.07.2018
+
+            conflictObj.clear();
+
+            min = getListObj().get(0).getTimeMin();  //пошук найближчої події
+
+            for (PetriSim e : getListObj()) {
+                if (e.getTimeMin() < min) {
+                    min = e.getTimeMin();
+                }
+            }
+            /*  if(min_t<t){ // added 24.06.2013   !!!!Подумать...при отрицательных задержках висит!!!!
+             JOptionPane.showMessageDialog(null, "Negative time delay was generated! Check parameters, please/");
+             return;
+
+             }*/
+            if (isStatistics() == true) {
+                for (PetriSim e : getListObj()) {
+                    if (min > 0) {
+                        if(min<this.getSimulationTime())
+                            e.doStatistics((min - this.getCurrentTime()) / min); //статистика за час "дельта т", для спільних позицій потрібно статистику збирати тільки один раз!!!
+                        else
+                            e.doStatistics((this.getSimulationTime() - this.getCurrentTime()) / this.getSimulationTime());
+                    }
+
+                }
+            }
+
+            //зміна даних з камери
+            if(useInfoFromCameras) {
+                if(infoFromCameras.size() > currentPositionInArray) {
+                    currentPositionInArray += getAddedCycles(timeInCycle, this.getCurrentTime(), min);
+                }
+
+                if(infoFromCameras.size() <= currentPositionInArray) {
+                    currentPositionInArray = infoFromCameras.size() - 1;
+                }
+
+                changeIntensity(getListObj(), infoFromCameras.get(currentPositionInArray));
+            }
+
+
+
+            this.setCurrentTime(min); // просування часу //3.12.2015
+
+            if (isProtocolPrint() == true) {
+                System.out.println(" Time progress: time = " + this.getCurrentTime() + "\n");
+            }
+            if (this.getCurrentTime() <= this.getSimulationTime()) {
+
+                for (PetriSim sim : getListObj()) {
+                    if (this.getCurrentTime() == sim.getTimeMin()) // розв'язання конфлікту об'єктів рівноймовірнісним способом
+                    {
+                        conflictObj.add(sim);                           //список конфліктних обєктів
+                    }
+                }
+                int num;
+                int max;
+                if (isProtocolPrint() == true) {
+                    System.out.println(" List of conflicting objects  " + "\n");
+                    for (int ii = 0; ii < conflictObj.size(); ii++) {
+                        System.out.println(" K [ " + ii + "  ] = " + conflictObj.get(ii).getName() + "\n");
+                    }
+                }
+
+                if (conflictObj.size() > 1) { //вибір об'єкта, що запускається
+                    max = conflictObj.size();
+                    conflictObj.sort(PetriSim.getComparatorByPriority());
+                    for (int i = 1; i < conflictObj.size(); i++) { //System.out.println("  "+conflictObj.get(i).getPriority()+"  "+conflictObj.get(i-1).getPriority());
+                        if (conflictObj.get(i).getPriority() < conflictObj.get(i - 1).getPriority()) {
+                            max = i - 1;
+                            //System.out.println("max=  "+max);
+                            break;
+                        }
+
+                    }
+                    if (max == 0) {
+                        num = 0;
+                    } else {
+                        num = r.nextInt(max);
+                    }
+                } else {
+                    num = 0;
+                }
+
+                if (isProtocolPrint() == true) {
+                    System.out.println(" Selected object  " + conflictObj.get(num).getName() + "\n" + " NextEvent " + "\n");
+                }
+
+                for (PetriSim sim: getListObj()) {
+                    if (sim.getNumObj() == conflictObj.get(num).getNumObj()) {
+                        if (isProtocolPrint() == true) {
+                            System.out.println(" time =   " + this.getCurrentTime() + "   Event '" + sim.getEventMin().getName() + "'\n"
+                                    + "                       is occuring for the object   " + sim.getName() + "\n");
+                        }
+                        sim.doT();
+                        sim.output(); // added by Inna 11.07.2018
+                    }
+                }
+                if (isProtocolPrint() == true) {
+                    System.out.println("Markers output:");
+                    for (PetriSim sim : getListObj()) //ДРУК поточного маркірування
+                    {
+                        sim.printMark();
+                    }
+                }
+
+                Collections.shuffle(getListObj()); // added by Inna 11.07.2018, need for correct functioning of Petri object's shared resource
+
+                getListObj().sort(PetriSim.getComparatorByPriority());
+
+                for (PetriSim e : getListObj()) {
+                    //можливо змінились умови для інших обєктів
+                    e.input(); //вхід маркерів в переходи Петрі-об'єкта
+
+                }
+                if (isProtocolPrint() == true) {
+                    System.out.println("Markers input:");
+                    for (PetriSim e : getListObj()){ //ДРУК поточного маркірування
+                        e.printMark();
+                    }
+                }
+            }
+
+        }
+        getListObj().sort(PetriSim.getComparatorByNum()); // return the initial order in the list for a correct output of the results (in SMO test)
+
+
+        double response = 0;
+
+        for (int i = 0; i < getListObj().size(); i++) {
+            for(int j = 0; j < getListObj().get(i).getNet().getListP().length; j++) {
+                if(isQueue(getListObj().get(i).getNet(), j)) {
+                    if(getListObj().get(i).getNet().getListP()[j].getMean() > response) {
+                        response = getListObj().get(i).getNet().getListP()[j].getMean();
+                        //System.out.println(getListObj().get(i).getNet().getListP()[j].getName());
+                    }
+                }
+
+            }
+        }
+
+        return response;
+    }
+
+    public void changeIntensity(ArrayList<PetriSim> arr, double info) {//added 19.05.2021 by Vladyslav Palii
+        String nameE = "netpart2_1";
+        String nameT = "T30";
+        for (PetriSim e : getListObj()) {
+            if(e.getName().equalsIgnoreCase(nameE)) {
+                for(PetriT t : e.getNet().getListT()) {
+                    if(t.getName().equalsIgnoreCase(nameT)) {
+                        //System.out.println(t.getParametr());
+                        t.setParametr(info);
+                    }
+                }
+            }
+        }
+    }
+
+    public int getAddedCycles(double timeInCycle, double currentTime, double nextTime) {//added 19.05.2021 by Vladyslav Palii (знаходить скільки циклів пройшло з між поточним і наступним часом)
+        double change = nextTime - currentTime;
+        double start = currentTime - Math.floor(currentTime/timeInCycle) * timeInCycle;
+        return (int) Math.floor((start+change)/timeInCycle);
+    }
+
+    public boolean isQueue(PetriNet net, int j) throws ExceptionInvalidNetStructure, ExceptionInvalidTimeDelay {//added 19.05.2021 by Vladyslav Palii
+        ArrayList<String> queuesNetpart1 = (new Netpart1()).getQueue();
+        ArrayList<String> queuesNetpart2 = (new Netpart2()).getQueue();
+        ArrayList<String> queuesNetpart3 = (new Netpart3()).getQueue();
+
+        switch((new TransportModel()).getName(net.getName())) {
+            case NETPART1: return containsName(queuesNetpart1, net, j);
+            case NETPART2: return containsName(queuesNetpart2, net, j);
+            case NETPART3: return containsName(queuesNetpart3, net, j);
+            case NOTFOUND: throw new Error("Unknown net type");
+        }
+
+        return false;
+    }
+
+    private boolean containsName(ArrayList<String> queues, PetriNet net, int j) {//added 19.05.2021 by Vladyslav Palii
+        for(int i = 0; i < queues.size(); i++) {
+            if(queues.get(i).equals(net.getListP()[j].getName())) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }
